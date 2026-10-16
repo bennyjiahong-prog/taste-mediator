@@ -51,6 +51,8 @@ npm start
 
 ## Demo
 
+Live demo: [https://taste-mediator.vercel.app/](https://taste-mediator.vercel.app/). `QLOO_API_KEY` is set on the Vercel server environment. A same-day smoke check on 2026-10-17 passed: **Mediate** returns real Qloo results for the locked seeds.
+
 The page opens on the locked seeds.
 
 | Person | Shelf | Seeds |
@@ -81,14 +83,14 @@ Set `QLOO_API_KEY` on the server, open the app, and use the browser developer to
 
 ## Stage 1 checklist
 
-- [ ] **Demo URL** — not live. Vercel is not connected to this Origin repo, so there is no HTTPS deployment yet.
-- [ ] **Public repo** — this repository is **Origin PRIVATE**, not a public web repo: [kowloonbay/taste-mediator](https://cursor.com/codebase/kowloonbay/taste-mediator).
-- [x] **Real API** — with `QLOO_API_KEY` set on the server, Mediate performs live `GET /search` and two `GET /v2/insights` calls. A missing key or an API failure clears the results. No stand-in list is shipped in the client.
+- [x] **Demo URL** — live at [https://taste-mediator.vercel.app/](https://taste-mediator.vercel.app/).
+- [x] **Public repo** — this public GitHub repository: [bennyjiahong-prog/taste-mediator](https://github.com/bennyjiahong-prog/taste-mediator).
+- [x] **Real API** — `QLOO_API_KEY` is set on the Vercel server environment. Never commit the key, and never prefix it with `NEXT_PUBLIC_`. Mediate performs live `GET /search` and two `GET /v2/insights` calls. A same-day smoke check on 2026-10-17 passed: Mediate returns real Qloo results for the locked seeds. A missing key or an API failure clears the results. No stand-in list is shipped in the client.
 - [x] **Open source** — MIT. See [./LICENSE](./LICENSE).
 
-The demo stays dark until two clicks land. In the Agents window, choose **Add Vercel** and connect a Vercel team on a plan above Hobby (a private Origin repo cannot deploy from Hobby). Then choose **Publish** above the agent input so `main` deploys. After the project exists, paste `QLOO_API_KEY` into that project's environment variables. Do not put the key in the repo or in chat.
+The public path is this GitHub repository and the live demo above. Origin repositories `taste-mediator` and `taste-mediator-public` stay private. They are an optional private backup, not the submission judges should use.
 
-This repository does not submit to Devpost.
+Devpost submission is human-only. This repository does not auto-submit.
 
 ## License
 
