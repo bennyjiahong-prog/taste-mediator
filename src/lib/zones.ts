@@ -17,8 +17,9 @@ function mergePair(left: ApiMovie, right: ApiMovie): ApiMovie {
 }
 
 /**
- * Compromise is set membership across two independent pulls.
- * Nothing here blends scores.
+ * Compromise is set membership of entityId across two independent pulls.
+ * The same display name on two ids is not overlap. An empty intersection
+ * stays empty: nothing here blends scores or invents a title.
  */
 export function partitionZones(personA: ApiMovie[], personB: ApiMovie[]) {
   const bById = new Map<string, ApiMovie>();

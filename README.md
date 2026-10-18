@@ -32,7 +32,7 @@ QLOO_API_KEY=your_hackathon_key
 
 On Vercel, set `QLOO_API_KEY` in the project environment. Leave `QLOO_BASE_URL` unset unless you need to repeat the default host. Any other host is refused, so a hackathon key is not sent to production or staging.
 
-Without `QLOO_API_KEY`, the app still builds and runs. Mediate returns a not-connected state and the results area stays empty.
+Without `QLOO_API_KEY`, the app still builds and runs. Press **Mediate** and `POST /api/mediate` returns **HTTP 503** with `"code": "missing_key"`. Search does not run, insights do not run, and the page shows that status with no movie cards. See [Run without a key](#run-without-a-key).
 
 ## Run
 
@@ -78,8 +78,49 @@ Set `QLOO_API_KEY` on the server, open the app, and use the browser developer to
 1. Press **Mediate** and watch the Network panel. The only request the browser makes is `POST /api/mediate`.
 2. Open that response. `steps` lists `GET /search` for each selected title, then `GET /v2/insights` twice. The server sends those to `https://hackathon.api.qloo.com`.
 3. The browser request does not carry `X-Api-Key` or `QLOO_API_KEY`. The key stays in the server environment.
-4. Remove the key and press **Mediate** again. The zones clear.
+4. Remove the key and press **Mediate** again. The response is HTTP 503 `missing_key`, and the zones clear.
 5. With a key, the safe zone is the titles whose `entityId` is in both insight lists. The two pulls are not averaged. If that intersection is empty, the page says to take turns and does not invent a title.
+
+## Honest empty set
+
+Overlap is the set of `entityId` values that appear in both insights pulls. A matching title with two different ids is not a match. When that intersection is empty, the safe zone is an empty set: a short explanation, the count on each side, and no movie card. The page does not borrow a title from A only or B only to fill it.
+
+Search `429` and insights `429` clear every recommendation title. The page says which call was limited. An insights failure does not keep the other person's list. Upstream error text is shown only when it is short and has no key material.
+
+### Run locally
+
+```bash
+npm install
+npm test
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000). The browser only calls `POST /api/mediate`. Put `QLOO_API_KEY` in `.env.local` when you want live Qloo data.
+
+### Run without a key
+
+Leave `QLOO_API_KEY` unset. An empty `.env.local` copied from `.env.example` is enough. The page loads and the banner says Qloo is not connected.
+
+Press **Mediate**. Expect **HTTP 503** and a JSON body with `"ok": false` and `"code": "missing_key"`. The results area uses the same status layout as a search or insights failure: a heading, a Search row, a Mediate row, and no movie card.
+
+```bash
+curl -s -D - \
+  -H "Content-Type: application/json" \
+  -d '{"personA":[{"title":"The Shining","year":1980},{"title":"Hereditary","year":2018}],"personB":[{"title":"Notting Hill","year":1999},{"title":"Love Actually","year":2003}]}' \
+  http://localhost:3000/api/mediate
+```
+
+The status line is `503`. The body code is `missing_key`. No `steps` are recorded, because the key check happens before any Qloo call.
+
+### How tests stub Qloo
+
+There is no runtime movie stub and no sample list in the client. Loading shows a status skeleton (bars, not posters or titles). An empty overlap and an empty conflict column stay empty.
+
+`npm test` calls `mediate()` with a `fetchImpl`. That function is the stub: it returns canned JSON for `GET /search` and `GET /v2/insights` and does not open a socket to `https://hackathon.api.qloo.com`. A blank key still returns 503 `missing_key` before `fetchImpl` is used. The suite includes a zero-intersection case and a rate limit. It is not a live Qloo check.
+
+### HOLD — Devpost
+
+Devpost submission is only by the human owner. Do not submit from this repository, from an agent, or from CI. This tree does not call Devpost.
 
 ## Stage 1 checklist
 
@@ -90,7 +131,7 @@ Set `QLOO_API_KEY` on the server, open the app, and use the browser developer to
 
 The public path is this GitHub repository and the live demo above. Origin repositories `taste-mediator` and `taste-mediator-public` stay private. They are an optional private backup, not the submission judges should use.
 
-Devpost submission is human-only. This repository does not auto-submit.
+HOLD: Devpost submission is only by the human owner. This repository does not submit.
 
 ## License
 

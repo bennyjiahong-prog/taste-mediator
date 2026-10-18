@@ -1,13 +1,46 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import {
+  emptySetCopy,
+  publicFailureMessage,
+  publicFailureTitle,
+  type EmptySetCopy,
+} from "@/lib/results-copy";
 import { seedKey, seedsFor, type Preset, type Seed, type Side } from "@/lib/seeds";
-import type { ApiMovie, MediateFailure, MediateSuccess, QlooStep, SeedHit } from "@/lib/types";
+import {
+  emptyColumnCopy,
+  errorPhaseRows,
+  FOCUS,
+  idlePanelCopy,
+  loadingPanelCopy,
+  loadingPhaseRows,
+  loadingSkeletonNote,
+  mediateButtonLabel,
+  mediateHint,
+  PRIMARY_FOCUS_CLASS,
+  primaryActionAriaDisabled,
+  retryActionLabel,
+  settleFocusId,
+  type PanelCopy,
+  type PhaseRow,
+} from "@/lib/status-copy";
+import type { ApiMovie, FailCode, MediateFailure, MediateSuccess, QlooStep, SeedHit } from "@/lib/types";
 import { partitionZones, topTags } from "@/lib/zones";
+
+const FAIL_CODES: readonly FailCode[] = [
+  "missing_key",
+  "invalid_key",
+  "bad_request",
+  "bad_config",
+  "seed_unresolved",
+  "upstream",
+  "rate_limited",
+];
 
 const SHOW_LIMIT = 8;
 
@@ -30,6 +63,13 @@ export function MovieNight({ children }: { children?: ReactNode }) {
   const selectedB = seedsFor(preset, "B").filter((seed) => selected.includes(seedKey(seed)));
   const canMediate = selectedA.length >= 2 && selectedB.length >= 2;
   const loading = view.kind === "loading";
+  const mediatePaused = primaryActionAriaDisabled({ action: "mediate", loading, canMediate });
+  const shelfPaused = primaryActionAriaDisabled({ action: "preset", loading, canMediate });
+
+  useEffect(() => {
+    if (view.kind === "idle") return;
+    document.getElementById(settleFocusId(view.kind))?.focus();
+  }, [view]);
 
   function choosePreset(next: Preset) {
     if (loading) return;
@@ -129,45 +169,55 @@ export function MovieNight({ children }: { children?: ReactNode }) {
       <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap gap-2" role="group" aria-label="Seed shelf">
           <Button
+            id={FOCUS.presetMain}
             type="button"
             variant={preset === "main" ? "default" : "outline"}
+            className={shelfPaused ? `opacity-50 ${PRIMARY_FOCUS_CLASS}` : PRIMARY_FOCUS_CLASS}
             data-testid="preset-main"
-            disabled={loading}
+            aria-disabled={shelfPaused || undefined}
             onClick={() => choosePreset("main")}
           >
             Main seeds
           </Button>
           <Button
+            id={FOCUS.presetBackup}
             type="button"
             variant={preset === "backup" ? "default" : "outline"}
+            className={shelfPaused ? `opacity-50 ${PRIMARY_FOCUS_CLASS}` : PRIMARY_FOCUS_CLASS}
             data-testid="preset-backup"
-            disabled={loading}
+            aria-disabled={shelfPaused || undefined}
             onClick={() => choosePreset("backup")}
           >
             Backup seeds
           </Button>
         </div>
         <Button
+          id={FOCUS.mediate}
           type="button"
           size="lg"
-          className="h-11 px-5 text-base sm:min-w-40"
+          className={
+            mediatePaused
+              ? `h-11 px-5 text-base opacity-50 sm:min-w-40 ${PRIMARY_FOCUS_CLASS}`
+              : `h-11 px-5 text-base sm:min-w-40 ${PRIMARY_FOCUS_CLASS}`
+          }
           data-testid="mediate-button"
-          disabled={!canMediate || loading}
+          aria-describedby={FOCUS.mediateHint}
+          aria-disabled={mediatePaused || undefined}
           onClick={() => void mediate()}
         >
-          {loading ? "Mediating…" : "Mediate"}
+          {mediateButtonLabel(loading)}
         </Button>
       </div>
-      <p className="mt-3 text-sm text-muted-foreground">
-        {canMediate
-          ? "Two Qloo insight pulls, one per person. At least two seeds stay selected on each side."
-          : "Choose at least two seeds on each side."}
+      <p id={FOCUS.mediateHint} className="mt-3 text-sm text-muted-foreground">
+        {mediateHint(canMediate)}
       </p>
 
       <div className="mt-10" aria-live="polite" data-testid="results">
         {view.kind === "idle" ? <IdleResults /> : null}
         {view.kind === "loading" ? <LoadingResults /> : null}
-        {view.kind === "error" ? <ErrorResults failure={view.failure} /> : null}
+        {view.kind === "error" ? (
+          <ErrorResults failure={view.failure} onRetry={() => void mediate()} />
+        ) : null}
         {view.kind === "ready" ? <ReadyResults data={view.data} /> : null}
       </div>
     </div>
@@ -216,15 +266,20 @@ function SeedColumn({
               key={seedKey(seed)}
               type="button"
               aria-pressed={on}
-              disabled={disabled}
+              aria-disabled={disabled || undefined}
               data-testid={`seed-${side}-${slug(seed.title)}`}
-              onClick={() => onToggle(seed)}
+              onClick={() => {
+                if (disabled) return;
+                onToggle(seed);
+              }}
               className={
-                on
+                (on
                   ? horror
-                    ? "flex min-h-14 w-full items-center justify-between gap-3 rounded-lg bg-horror px-3 py-3 text-left text-white focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60"
-                    : "flex min-h-14 w-full items-center justify-between gap-3 rounded-lg bg-romance px-3 py-3 text-left text-white focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60"
-                  : "flex min-h-14 w-full items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-3 text-left focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60"
+                    ? "flex min-h-14 w-full items-center justify-between gap-3 rounded-lg bg-horror px-3 py-3 text-left text-white"
+                    : "flex min-h-14 w-full items-center justify-between gap-3 rounded-lg bg-romance px-3 py-3 text-left text-white"
+                  : "flex min-h-14 w-full items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-3 text-left") +
+                ` ${PRIMARY_FOCUS_CLASS}` +
+                (disabled ? " opacity-60" : "")
               }
             >
               <span>
@@ -243,36 +298,46 @@ function SeedColumn({
 }
 
 function IdleResults() {
-  return (
-    <section className="rounded-2xl border border-dashed border-border bg-card/70 px-5 py-8">
-      <h2 className="font-heading text-2xl">No mediation yet</h2>
-      <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-        Press Mediate. Search runs first, then two insight pulls. This page does not keep a sample
-        list.
-      </p>
-    </section>
-  );
+  return <StatusPanel copy={idlePanelCopy()} headingId={FOCUS.idleHeading} testId="idle-panel" />;
 }
 
 function LoadingResults() {
   return (
-    <section className="rounded-2xl border border-border bg-card px-5 py-8">
-      <h2 className="font-heading text-2xl">Asking Qloo</h2>
-      <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-        Resolving each selected title, then requesting movie insights for Person A and again for
-        Person B. Titles appear only after those calls return.
-      </p>
-    </section>
+    <StatusPanel
+      copy={loadingPanelCopy()}
+      headingId={FOCUS.loadingHeading}
+      testId="loading-panel"
+      busy
+    >
+      <PhaseList rows={loadingPhaseRows()} testId="loading-phases" />
+      <div className="mt-4 flex flex-col gap-2" data-testid="loading-skeleton" aria-hidden="true">
+        <div className="h-2.5 w-2/3 animate-pulse rounded-full bg-muted" />
+        <div className="h-2.5 w-1/2 animate-pulse rounded-full bg-muted" />
+        <div className="h-2.5 w-3/5 animate-pulse rounded-full bg-muted" />
+      </div>
+      <p className="sr-only">{loadingSkeletonNote()}</p>
+    </StatusPanel>
   );
 }
 
-function ErrorResults({ failure }: { failure: MediateFailure }) {
+function ErrorResults({ failure, onRetry }: { failure: MediateFailure; onRetry: () => void }) {
+  const copy: PanelCopy = {
+    tone: "error",
+    title: publicFailureTitle(failure.code, failure.steps),
+    body: publicFailureMessage(failure),
+  };
   return (
-    <section className="rounded-2xl border border-destructive/30 bg-card px-5 py-8">
-      <h2 className="font-heading text-2xl">Results cleared</h2>
-      <p className="mt-2 max-w-2xl text-sm leading-relaxed" data-testid="results-message">
-        {visibleFailureMessage(failure)}
-      </p>
+    <StatusPanel copy={copy} headingId={FOCUS.errorHeading} testId="error-panel">
+      <PhaseList rows={errorPhaseRows(failure)} testId="error-phases" />
+      <Button
+        id={FOCUS.retry}
+        type="button"
+        className={`mt-5 ${PRIMARY_FOCUS_CLASS}`}
+        data-testid="mediate-retry"
+        onClick={onRetry}
+      >
+        {retryActionLabel()}
+      </Button>
       {failure.seeds ? (
         <div className="mt-6">
           <SeedReport personA={failure.seeds.personA} personB={failure.seeds.personB} />
@@ -283,7 +348,79 @@ function ErrorResults({ failure }: { failure: MediateFailure }) {
           <Trace steps={failure.steps} />
         </div>
       ) : null}
+    </StatusPanel>
+  );
+}
+
+function StatusPanel({
+  copy,
+  headingId,
+  testId,
+  busy,
+  children,
+}: {
+  copy: PanelCopy;
+  headingId: string;
+  testId: string;
+  busy?: boolean;
+  children?: ReactNode;
+}) {
+  const frame =
+    copy.tone === "error"
+      ? "border-destructive/30 bg-card"
+      : copy.tone === "loading"
+        ? "border-border bg-card"
+        : "border-dashed border-border bg-card/70";
+  return (
+    <section
+      className={`rounded-2xl border px-5 py-8 ${frame}`}
+      aria-labelledby={headingId}
+      aria-busy={busy ? true : undefined}
+      data-testid={testId}
+      data-tone={copy.tone}
+    >
+      <h2
+        id={headingId}
+        tabIndex={-1}
+        className="scroll-mt-8 rounded-sm font-heading text-2xl outline-none focus-visible:ring-3 focus-visible:ring-ring"
+        data-testid={testId === "error-panel" ? "error-title" : undefined}
+      >
+        {copy.title}
+      </h2>
+      <p
+        className={
+          copy.tone === "error"
+            ? "mt-2 max-w-2xl text-sm leading-relaxed"
+            : "mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground"
+        }
+        data-testid={copy.tone === "error" ? "results-message" : undefined}
+      >
+        {copy.body}
+      </p>
+      {children}
     </section>
+  );
+}
+
+function PhaseList({ rows, testId }: { rows: PhaseRow[]; testId: string }) {
+  return (
+    <ol className="mt-6 flex flex-col gap-3" data-testid={testId}>
+      {rows.map((row) => (
+        <li
+          key={row.id}
+          className="rounded-xl border border-dashed border-border bg-background/60 px-3 py-3"
+          data-phase={row.id}
+          data-state={row.state}
+        >
+          <p className="text-xs font-medium tracking-[0.16em] text-muted-foreground uppercase">
+            {row.label}
+            <span className="sr-only">, {row.stateLabel}</span>
+          </p>
+          <p className="mt-1 text-sm font-medium">{row.stateLabel}</p>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{row.detail}</p>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -291,31 +428,45 @@ function ReadyResults({ data }: { data: MediateSuccess }) {
   const zones = partitionZones(data.personA.insights, data.personB.insights);
   const aTags = topTags(zones.aOnly);
   const bTags = topTags(zones.bOnly);
-  const bothEmpty = data.personA.insights.length === 0 && data.personB.insights.length === 0;
+  const empty = emptySetCopy({
+    overlapCount: zones.overlap.length,
+    aOnlyCount: zones.aOnly.length,
+    bOnlyCount: zones.bOnly.length,
+  });
 
   return (
     <div className="flex flex-col gap-8">
-      <blockquote className="max-w-3xl font-heading text-2xl leading-snug sm:text-3xl">
-        {zones.overlap.length > 0
-          ? "The safe zone is the overlap. A title is here because both pulls returned it."
-          : bothEmpty
-            ? "Neither pull returned a title, so the overlap is empty too."
-            : "No title landed in both pulls. The compromise tonight is to take turns."}
+      <blockquote
+        id={FOCUS.resultsHeading}
+        tabIndex={-1}
+        className="max-w-3xl scroll-mt-8 rounded-sm font-heading text-2xl leading-snug outline-none focus-visible:ring-3 focus-visible:ring-ring sm:text-3xl"
+      >
+        {empty
+          ? empty.headline
+          : "The safe zone is the overlap. A title is here because both pulls returned the same entity id."}
       </blockquote>
       <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-        Each side is its own Qloo insights call. A shared title is membership in both lists. The
-        two pulls are never averaged into one score.
+        Each side is its own Qloo insights call. A shared title is the same entity id in both
+        lists. The two pulls are never averaged into one score.
       </p>
 
-      <section data-testid="conflict-zone" aria-labelledby="conflict-heading">
+      <section
+        data-testid="conflict-zone"
+        aria-labelledby="conflict-heading"
+        aria-describedby="conflict-detail"
+      >
         <div className="flex flex-wrap items-end justify-between gap-2">
           <h2 id="conflict-heading" className="font-heading text-3xl tracking-tight">
             Conflict zone
+            <span className="sr-only">, minefield</span>
           </h2>
-          <p className="text-sm text-muted-foreground">Titles only one pull returned</p>
+          <p id="conflict-detail" className="text-sm text-muted-foreground">
+            Titles only one pull returned
+          </p>
         </div>
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
           <ZoneColumn
+            side="A"
             title="A only"
             detail="Person A's pull, absent from Person B"
             tone="horror"
@@ -324,6 +475,7 @@ function ReadyResults({ data }: { data: MediateSuccess }) {
             tags={aTags}
           />
           <ZoneColumn
+            side="B"
             title="B only"
             detail="Person B's pull, absent from Person A"
             tone="romance"
@@ -338,16 +490,20 @@ function ReadyResults({ data }: { data: MediateSuccess }) {
         className="rounded-2xl bg-safe-soft px-4 py-5 sm:px-5"
         data-testid="safe-zone"
         aria-labelledby="safe-heading"
+        aria-describedby="safe-detail"
       >
         <h2 id="safe-heading" className="font-heading text-3xl tracking-tight text-safe">
           Safe zone
+          <span className="sr-only">, shared entity ids only</span>
         </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {zones.overlap.length > 0
-            ? "Listed in the order Person A's pull returned them."
-            : "Zero overlap. No title was added to fill this space."}
+        <p id="safe-detail" className="mt-1 text-sm text-muted-foreground">
+          {empty
+            ? "Zero overlap. No title was added to fill this space."
+            : "Listed in the order Person A's pull returned them."}
         </p>
-        {zones.overlap.length > 0 ? (
+        {empty ? (
+          <EmptySet copy={empty} />
+        ) : (
           <ul className="mt-4 grid gap-3 sm:grid-cols-2">
             {zones.overlap.slice(0, 12).map((movie) => (
               <li key={movie.entityId}>
@@ -355,12 +511,6 @@ function ReadyResults({ data }: { data: MediateSuccess }) {
               </li>
             ))}
           </ul>
-        ) : (
-          <p className="mt-4 max-w-2xl text-sm leading-relaxed">
-            {bothEmpty
-              ? "Qloo returned no movie entities for either person."
-              : "Watch one person's pick this week and the other's next week. A hybrid only belongs here after a later call actually returns it for both."}
-          </p>
         )}
       </section>
 
@@ -372,6 +522,7 @@ function ReadyResults({ data }: { data: MediateSuccess }) {
 }
 
 function ZoneColumn({
+  side,
   title,
   detail,
   tone,
@@ -379,6 +530,7 @@ function ZoneColumn({
   pullCount,
   tags,
 }: {
+  side: Side;
   title: string;
   detail: string;
   tone: "horror" | "romance";
@@ -387,13 +539,14 @@ function ZoneColumn({
   tags: string[];
 }) {
   const shown = movies.slice(0, SHOW_LIMIT);
-  const empty =
-    pullCount === 0
-      ? "This pull returned no titles."
-      : "Every title from this pull also came back for the other person.";
+  const empty = emptyColumnCopy({ side, pullCount });
+  const minefield = tone === "horror" ? ", minefield, Person A" : ", minefield, Person B";
   return (
     <div className={tone === "horror" ? "rounded-2xl bg-horror-soft/70 p-4" : "rounded-2xl bg-romance-soft/80 p-4"}>
-      <h3 className="font-heading text-2xl">{title}</h3>
+      <h3 className="font-heading text-2xl">
+        {title}
+        <span className="sr-only">{minefield}</span>
+      </h3>
       <p className="text-sm text-muted-foreground">{detail}</p>
       {tags.length > 0 ? (
         <div className="mt-3 flex flex-wrap gap-1">
@@ -413,13 +566,36 @@ function ZoneColumn({
           ))}
         </ul>
       ) : (
-        <p className="mt-4 text-sm">{empty}</p>
+        <div
+          className="mt-4 rounded-xl border border-dashed border-border bg-card/80 px-3 py-3"
+          data-testid={`empty-column-${side}`}
+          data-tone="empty"
+        >
+          <p className="text-sm font-medium">{empty.title}</p>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{empty.body}</p>
+        </div>
       )}
       {movies.length > SHOW_LIMIT ? (
         <p className="mt-3 text-xs text-muted-foreground">
           Showing {SHOW_LIMIT} of {movies.length} from this pull.
         </p>
       ) : null}
+    </div>
+  );
+}
+
+function EmptySet({ copy }: { copy: EmptySetCopy }) {
+  return (
+    <div
+      className="mt-4 rounded-xl border border-dashed border-safe/50 bg-card/80 px-4 py-5"
+      data-testid="safe-zone-empty"
+    >
+      <p className="text-xs font-medium tracking-[0.16em] text-safe uppercase">Empty set</p>
+      <p className="mt-2 font-heading text-2xl leading-snug">{copy.lead}</p>
+      <p className="mt-2 max-w-2xl text-sm leading-relaxed">{copy.body}</p>
+      <p className="mt-3 text-sm text-muted-foreground" data-testid="empty-set-counts">
+        {copy.counts}
+      </p>
     </div>
   );
 }
@@ -519,13 +695,6 @@ function Trace({ steps }: { steps: QlooStep[] }) {
       </ol>
     </section>
   );
-}
-
-function visibleFailureMessage(failure: MediateFailure): string {
-  if (failure.code === "rate_limited") {
-    return "Qloo rate-limited — try again shortly. Results were cleared.";
-  }
-  return failure.message;
 }
 
 function slug(title: string): string {
@@ -629,13 +798,16 @@ function asFailure(value: unknown): MediateFailure | null {
   if (payload.ok !== false || typeof payload.message !== "string" || typeof payload.code !== "string") {
     return null;
   }
+  const code: FailCode = FAIL_CODES.includes(payload.code as FailCode)
+    ? (payload.code as FailCode)
+    : "upstream";
   const seeds =
     payload.seeds && Array.isArray(payload.seeds.personA) && Array.isArray(payload.seeds.personB)
       ? { personA: asSeeds(payload.seeds.personA), personB: asSeeds(payload.seeds.personB) }
       : undefined;
   return {
     ok: false,
-    code: payload.code,
+    code,
     message: payload.message,
     steps: asSteps(payload.steps),
     ...(seeds ? { seeds } : {}),

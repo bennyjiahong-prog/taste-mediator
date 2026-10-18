@@ -1,3 +1,5 @@
+import { missingKeyBannerCopy } from "@/lib/status-copy";
+
 export function KeyStatus({ state }: { state: "unknown" | "present" | "missing" }) {
   if (state === "unknown") {
     return (
@@ -21,14 +23,15 @@ export function KeyStatus({ state }: { state: "unknown" | "present" | "missing" 
     );
   }
 
+  const missing = missingKeyBannerCopy();
   return (
     <p
       className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-foreground"
       data-testid="key-status"
       role="status"
     >
-      Qloo is not connected. This server has no QLOO_API_KEY. Mediate will not invent a movie
-      list.
+      <span className="font-medium">{missing.title}. </span>
+      {missing.body}
     </p>
   );
 }

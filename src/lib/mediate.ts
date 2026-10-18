@@ -1,4 +1,5 @@
 import { extractEntityArray, normalizeEntities, pickSeedMatch } from "@/lib/normalize";
+import { isSafePublicMessage, rateLimitMessage } from "@/lib/results-copy";
 import { findSeed, type Seed, type Side } from "@/lib/seeds";
 import type {
   ApiMovie,
@@ -98,10 +99,6 @@ function parseSide(raw: unknown, side: Side): Seed[] | string {
   return seeds;
 }
 
-function redact(text: string, key: string): string {
-  return text.split(key).join("[redacted]");
-}
-
 function upstreamHint(body: unknown, key: string): string {
   const record = asRecord(body);
   const nested = asRecord(record?.error);
@@ -110,8 +107,10 @@ function upstreamHint(body: unknown, key: string): string {
     (typeof nested?.message === "string" && nested.message) ||
     (typeof record?.error === "string" && record.error) ||
     "";
-  const clean = redact(raw, key).replace(/\s+/g, " ").trim();
-  return clean ? ` ${clean.slice(0, 160)}` : "";
+  if (!raw || raw.includes(key)) return "";
+  const clean = raw.replace(/\s+/g, " ").trim().slice(0, 160);
+  if (!isSafePublicMessage(clean)) return "";
+  return ` ${clean}`;
 }
 
 async function qlooGet(options: {
@@ -202,7 +201,7 @@ function fatalFromStatus(status: number, body: unknown, key: string, what: strin
     return {
       code: "rate_limited",
       status: 429,
-      message: "Qloo rate-limited — try again shortly. Results were cleared.",
+      message: rateLimitMessage(what),
     };
   }
   if (status === 0) {
