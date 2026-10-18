@@ -44,3 +44,20 @@ test("empty pulls stay empty", () => {
   assert.deepEqual(zones, { overlap: [], aOnly: [], bOnly: [] });
   assert.deepEqual(topTags([movie("dddddddd-dddd-4ddd-8ddd-dddddddddddd", "X", [])]), []);
 });
+
+test("the same title with different entity ids is not overlap", () => {
+  const zones = partitionZones(
+    [movie("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "The Notebook", ["Romance"])],
+    [movie("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "The Notebook", ["Romance"])],
+  );
+  assert.deepEqual(zones.overlap, []);
+  assert.deepEqual(
+    zones.aOnly.map((item) => item.entityId),
+    ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
+  );
+  assert.deepEqual(
+    zones.bOnly.map((item) => item.entityId),
+    ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"],
+  );
+  assert.equal(zones.aOnly.length + zones.bOnly.length + zones.overlap.length, 2);
+});

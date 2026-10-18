@@ -5,9 +5,25 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import {
+  emptySetCopy,
+  publicFailureMessage,
+  publicFailureTitle,
+  type EmptySetCopy,
+} from "@/lib/results-copy";
 import { seedKey, seedsFor, type Preset, type Seed, type Side } from "@/lib/seeds";
-import type { ApiMovie, MediateFailure, MediateSuccess, QlooStep, SeedHit } from "@/lib/types";
+import type { ApiMovie, FailCode, MediateFailure, MediateSuccess, QlooStep, SeedHit } from "@/lib/types";
 import { partitionZones, topTags } from "@/lib/zones";
+
+const FAIL_CODES: readonly FailCode[] = [
+  "missing_key",
+  "invalid_key",
+  "bad_request",
+  "bad_config",
+  "seed_unresolved",
+  "upstream",
+  "rate_limited",
+];
 
 const SHOW_LIMIT = 8;
 
@@ -268,10 +284,16 @@ function LoadingResults() {
 
 function ErrorResults({ failure }: { failure: MediateFailure }) {
   return (
-    <section className="rounded-2xl border border-destructive/30 bg-card px-5 py-8">
-      <h2 className="font-heading text-2xl">Results cleared</h2>
+    <section
+      className="rounded-2xl border border-destructive/30 bg-card px-5 py-8"
+      aria-labelledby="error-heading"
+      data-testid="error-panel"
+    >
+      <h2 id="error-heading" className="font-heading text-2xl" data-testid="error-title">
+        {publicFailureTitle(failure.code, failure.steps)}
+      </h2>
       <p className="mt-2 max-w-2xl text-sm leading-relaxed" data-testid="results-message">
-        {visibleFailureMessage(failure)}
+        {publicFailureMessage(failure)}
       </p>
       {failure.seeds ? (
         <div className="mt-6">
@@ -291,28 +313,37 @@ function ReadyResults({ data }: { data: MediateSuccess }) {
   const zones = partitionZones(data.personA.insights, data.personB.insights);
   const aTags = topTags(zones.aOnly);
   const bTags = topTags(zones.bOnly);
-  const bothEmpty = data.personA.insights.length === 0 && data.personB.insights.length === 0;
+  const empty = emptySetCopy({
+    overlapCount: zones.overlap.length,
+    aOnlyCount: zones.aOnly.length,
+    bOnlyCount: zones.bOnly.length,
+  });
 
   return (
     <div className="flex flex-col gap-8">
       <blockquote className="max-w-3xl font-heading text-2xl leading-snug sm:text-3xl">
-        {zones.overlap.length > 0
-          ? "The safe zone is the overlap. A title is here because both pulls returned it."
-          : bothEmpty
-            ? "Neither pull returned a title, so the overlap is empty too."
-            : "No title landed in both pulls. The compromise tonight is to take turns."}
+        {empty
+          ? empty.headline
+          : "The safe zone is the overlap. A title is here because both pulls returned the same entity id."}
       </blockquote>
       <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-        Each side is its own Qloo insights call. A shared title is membership in both lists. The
-        two pulls are never averaged into one score.
+        Each side is its own Qloo insights call. A shared title is the same entity id in both
+        lists. The two pulls are never averaged into one score.
       </p>
 
-      <section data-testid="conflict-zone" aria-labelledby="conflict-heading">
+      <section
+        data-testid="conflict-zone"
+        aria-labelledby="conflict-heading"
+        aria-describedby="conflict-detail"
+      >
         <div className="flex flex-wrap items-end justify-between gap-2">
           <h2 id="conflict-heading" className="font-heading text-3xl tracking-tight">
             Conflict zone
+            <span className="sr-only">, minefield</span>
           </h2>
-          <p className="text-sm text-muted-foreground">Titles only one pull returned</p>
+          <p id="conflict-detail" className="text-sm text-muted-foreground">
+            Titles only one pull returned
+          </p>
         </div>
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
           <ZoneColumn
@@ -338,16 +369,20 @@ function ReadyResults({ data }: { data: MediateSuccess }) {
         className="rounded-2xl bg-safe-soft px-4 py-5 sm:px-5"
         data-testid="safe-zone"
         aria-labelledby="safe-heading"
+        aria-describedby="safe-detail"
       >
         <h2 id="safe-heading" className="font-heading text-3xl tracking-tight text-safe">
           Safe zone
+          <span className="sr-only">, shared entity ids only</span>
         </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {zones.overlap.length > 0
-            ? "Listed in the order Person A's pull returned them."
-            : "Zero overlap. No title was added to fill this space."}
+        <p id="safe-detail" className="mt-1 text-sm text-muted-foreground">
+          {empty
+            ? "Zero overlap. No title was added to fill this space."
+            : "Listed in the order Person A's pull returned them."}
         </p>
-        {zones.overlap.length > 0 ? (
+        {empty ? (
+          <EmptySet copy={empty} />
+        ) : (
           <ul className="mt-4 grid gap-3 sm:grid-cols-2">
             {zones.overlap.slice(0, 12).map((movie) => (
               <li key={movie.entityId}>
@@ -355,12 +390,6 @@ function ReadyResults({ data }: { data: MediateSuccess }) {
               </li>
             ))}
           </ul>
-        ) : (
-          <p className="mt-4 max-w-2xl text-sm leading-relaxed">
-            {bothEmpty
-              ? "Qloo returned no movie entities for either person."
-              : "Watch one person's pick this week and the other's next week. A hybrid only belongs here after a later call actually returns it for both."}
-          </p>
         )}
       </section>
 
@@ -391,9 +420,13 @@ function ZoneColumn({
     pullCount === 0
       ? "This pull returned no titles."
       : "Every title from this pull also came back for the other person.";
+  const minefield = tone === "horror" ? ", minefield, Person A" : ", minefield, Person B";
   return (
     <div className={tone === "horror" ? "rounded-2xl bg-horror-soft/70 p-4" : "rounded-2xl bg-romance-soft/80 p-4"}>
-      <h3 className="font-heading text-2xl">{title}</h3>
+      <h3 className="font-heading text-2xl">
+        {title}
+        <span className="sr-only">{minefield}</span>
+      </h3>
       <p className="text-sm text-muted-foreground">{detail}</p>
       {tags.length > 0 ? (
         <div className="mt-3 flex flex-wrap gap-1">
@@ -420,6 +453,22 @@ function ZoneColumn({
           Showing {SHOW_LIMIT} of {movies.length} from this pull.
         </p>
       ) : null}
+    </div>
+  );
+}
+
+function EmptySet({ copy }: { copy: EmptySetCopy }) {
+  return (
+    <div
+      className="mt-4 rounded-xl border border-dashed border-safe/50 bg-card/80 px-4 py-5"
+      data-testid="safe-zone-empty"
+    >
+      <p className="text-xs font-medium tracking-[0.16em] text-safe uppercase">Empty set</p>
+      <p className="mt-2 font-heading text-2xl leading-snug">{copy.lead}</p>
+      <p className="mt-2 max-w-2xl text-sm leading-relaxed">{copy.body}</p>
+      <p className="mt-3 text-sm text-muted-foreground" data-testid="empty-set-counts">
+        {copy.counts}
+      </p>
     </div>
   );
 }
@@ -519,13 +568,6 @@ function Trace({ steps }: { steps: QlooStep[] }) {
       </ol>
     </section>
   );
-}
-
-function visibleFailureMessage(failure: MediateFailure): string {
-  if (failure.code === "rate_limited") {
-    return "Qloo rate-limited — try again shortly. Results were cleared.";
-  }
-  return failure.message;
 }
 
 function slug(title: string): string {
@@ -629,13 +671,16 @@ function asFailure(value: unknown): MediateFailure | null {
   if (payload.ok !== false || typeof payload.message !== "string" || typeof payload.code !== "string") {
     return null;
   }
+  const code: FailCode = FAIL_CODES.includes(payload.code as FailCode)
+    ? (payload.code as FailCode)
+    : "upstream";
   const seeds =
     payload.seeds && Array.isArray(payload.seeds.personA) && Array.isArray(payload.seeds.personB)
       ? { personA: asSeeds(payload.seeds.personA), personB: asSeeds(payload.seeds.personB) }
       : undefined;
   return {
     ok: false,
-    code: payload.code,
+    code,
     message: payload.message,
     steps: asSteps(payload.steps),
     ...(seeds ? { seeds } : {}),
