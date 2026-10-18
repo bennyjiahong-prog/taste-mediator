@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { assertHackathonBase, mediate, RATE_LIMIT_BACKOFF_MS } from "@/lib/mediate";
+import { INSIGHTS_RATE_LIMIT_MESSAGE, SEARCH_RATE_LIMIT_MESSAGE } from "@/lib/results-copy";
+import { partitionZones } from "@/lib/zones";
 
 const KEY = "test-key-do-not-leak-9f3a";
 
@@ -292,7 +294,7 @@ test("persistent 429 returns rate_limited and no titles", async () => {
   assert.equal(result.payload.ok, false);
   if (!result.payload.ok) {
     assert.equal(result.payload.code, "rate_limited");
-    assert.match(result.payload.message, /Qloo rate-limited — try again shortly/);
+    assert.equal(result.payload.message, SEARCH_RATE_LIMIT_MESSAGE);
   }
   assert.deepEqual(sleeps, [...RATE_LIMIT_BACKOFF_MS]);
   assert.equal(calls.length, 1 + RATE_LIMIT_BACKOFF_MS.length);
@@ -301,4 +303,118 @@ test("persistent 429 returns rate_limited and no titles", async () => {
   assert.equal(encoded.includes("Invented Movie"), false);
   assert.equal(encoded.includes(KEY), false);
   assert.equal(encoded.includes("insights"), false);
+});
+
+test("search, two insight pulls, and a zero entityId intersection stay empty", async () => {
+  const { fetchImpl, calls } = mockFetch((url) => {
+    if (url.pathname === "/search") return catalog(url);
+    const signal = url.searchParams.get("signal.interests.entities") ?? "";
+    if (signal.includes(IDS.shining)) {
+      return {
+        status: 200,
+        body: { results: { entities: [entity(IDS.dark, "Only Dark", 2010)] } },
+      };
+    }
+    return {
+      status: 200,
+      body: { results: { entities: [entity(IDS.warm, "Only Warm", 2001)] } },
+    };
+  });
+  const result = await mediate(mainBody, {
+    apiKey: KEY,
+    fetchImpl,
+    sleepImpl: async () => {},
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.payload.ok, true);
+  if (!result.payload.ok) return;
+
+  const paths = calls.map((call) => call.url.pathname);
+  assert.equal(paths.filter((path) => path === "/search").length, 6);
+  assert.deepEqual(paths.filter((path) => path === "/v2/insights"), [
+    "/v2/insights",
+    "/v2/insights",
+  ]);
+  const zones = partitionZones(result.payload.personA.insights, result.payload.personB.insights);
+  assert.deepEqual(zones.overlap, []);
+  assert.deepEqual(
+    zones.aOnly.map((movie) => movie.name),
+    ["Only Dark"],
+  );
+  assert.deepEqual(
+    zones.bOnly.map((movie) => movie.name),
+    ["Only Warm"],
+  );
+  const encoded = JSON.stringify(result.payload);
+  assert.equal(encoded.includes("Shared Night"), false);
+  assert.equal(encoded.includes("Invented Compromise"), false);
+  assert.equal(encoded.includes(KEY), false);
+});
+
+test("an insights 429 clears the first pull and does not echo the key", async () => {
+  const sleeps: number[] = [];
+  let insights = 0;
+  const { fetchImpl, calls } = mockFetch((url) => {
+    if (url.pathname === "/search") return catalog(url);
+    insights += 1;
+    if (insights === 1) {
+      return {
+        status: 200,
+        body: { results: { entities: [entity(IDS.dark, "Only Dark", 2010)] } },
+      };
+    }
+    return { status: 429, body: { message: `slow down ${KEY}` } };
+  });
+  const result = await mediate(mainBody, {
+    apiKey: KEY,
+    fetchImpl,
+    sleepImpl: async (ms) => {
+      sleeps.push(ms);
+    },
+  });
+  assert.equal(result.status, 429);
+  assert.equal(result.payload.ok, false);
+  if (!result.payload.ok) {
+    assert.equal(result.payload.code, "rate_limited");
+    assert.equal(result.payload.message, INSIGHTS_RATE_LIMIT_MESSAGE);
+  }
+  assert.deepEqual(sleeps, [...RATE_LIMIT_BACKOFF_MS]);
+  assert.equal(calls.filter((call) => call.url.pathname === "/search").length, 6);
+  assert.equal(
+    calls.filter((call) => call.url.pathname === "/v2/insights").length,
+    2 + RATE_LIMIT_BACKOFF_MS.length,
+  );
+  const encoded = JSON.stringify(result.payload);
+  assert.equal(encoded.includes("Only Dark"), false);
+  assert.equal(encoded.includes(KEY), false);
+});
+
+test("a search error that echoes the key omits the body", async () => {
+  const { fetchImpl } = mockFetch(() => ({
+    status: 400,
+    body: { message: `rejected ${KEY} and ${"a".repeat(40)}` },
+  }));
+  const result = await mediate(mainBody, { apiKey: KEY, fetchImpl, sleepImpl: async () => {} });
+  assert.equal(result.status, 502);
+  assert.equal(result.payload.ok, false);
+  if (!result.payload.ok) {
+    assert.equal(result.payload.code, "upstream");
+    assert.match(result.payload.message, /Qloo rejected search for The Shining \(400\)/);
+    assert.match(result.payload.message, /Results were cleared/);
+    assert.equal(result.payload.message.includes(KEY), false);
+    assert.equal(result.payload.message.includes("a".repeat(28)), false);
+  }
+});
+
+test("a short upstream detail can stay when it has no secret", async () => {
+  const { fetchImpl } = mockFetch(() => ({
+    status: 400,
+    body: { message: "unknown filter" },
+  }));
+  const result = await mediate(mainBody, { apiKey: KEY, fetchImpl, sleepImpl: async () => {} });
+  assert.equal(result.payload.ok, false);
+  if (!result.payload.ok) {
+    assert.match(result.payload.message, /unknown filter/);
+    assert.equal(result.payload.message.includes(KEY), false);
+  }
 });

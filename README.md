@@ -81,6 +81,26 @@ Set `QLOO_API_KEY` on the server, open the app, and use the browser developer to
 4. Remove the key and press **Mediate** again. The zones clear.
 5. With a key, the safe zone is the titles whose `entityId` is in both insight lists. The two pulls are not averaged. If that intersection is empty, the page says to take turns and does not invent a title.
 
+## Honest empty set
+
+Overlap is the set of `entityId` values that appear in both insights pulls. A matching title with two different ids is not a match. When that intersection is empty, the safe zone is an empty set: a short explanation, the count on each side, and no movie card. The page does not borrow a title from A only or B only to fill it.
+
+Search `429` and insights `429` clear every recommendation title. The page says which call was limited. An insights failure does not keep the other person's list. Upstream error text is shown only when it is short and has no key material.
+
+### Run locally
+
+```bash
+npm install
+npm test
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000). The browser only calls `POST /api/mediate`. Put `QLOO_API_KEY` in `.env.local` when you want live Qloo data. Without that variable, Mediate returns a not-connected message and shows no titles.
+
+`npm test` is the local smoke for the mediate path: search for each selected seed, then insights for Person A and Person B, then the overlap. The suite includes a zero-intersection case and an insights rate limit. It does not call the live hackathon API.
+
+This repository does not submit to Devpost. Submission stays a separate human step.
+
 ## Stage 1 checklist
 
 - [x] **Demo URL** — live at [https://taste-mediator.vercel.app/](https://taste-mediator.vercel.app/).
