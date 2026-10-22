@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { KeyStatus } from "@/components/key-status";
 import { MovieNight } from "@/components/movie-night";
+import { LLM_KEY_ENV } from "@/lib/llm";
 
 export default function Page() {
   return (
@@ -16,5 +17,6 @@ export default function Page() {
 async function LiveKeyStatus() {
   await connection();
   const configured = Boolean(process.env.QLOO_API_KEY?.trim());
-  return <KeyStatus state={configured ? "present" : "missing"} />;
+  const agent = Boolean(process.env[LLM_KEY_ENV]?.trim());
+  return <KeyStatus state={configured ? "present" : "missing"} agent={agent} />;
 }

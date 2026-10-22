@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ApiMovie } from "@/lib/types";
-import { partitionZones, topTags } from "@/lib/zones";
+import { partitionZones, sharedTags, topTags } from "@/lib/zones";
 
 function movie(entityId: string, name: string, tags: string[] = []): ApiMovie {
   return {
@@ -43,4 +43,18 @@ test("empty pulls stay empty", () => {
   const zones = partitionZones([], []);
   assert.deepEqual(zones, { overlap: [], aOnly: [], bOnly: [] });
   assert.deepEqual(topTags([movie("dddddddd-dddd-4ddd-8ddd-dddddddddddd", "X", [])]), []);
+});
+
+test("shared tags are exact tag-ID membership, not name similarity", () => {
+  const shared = sharedTags(
+    [
+      { id: "urn:tag:genre:media:horror", name: "Horror" },
+      { id: "urn:tag:keyword:media:isolation", name: "Isolation" },
+    ],
+    [
+      { id: "urn:tag:keyword:media:isolation", name: "Isolation" },
+      { id: "urn:tag:genre:media:romantic_horror", name: "Horror" },
+    ],
+  );
+  assert.deepEqual(shared.map((tag) => tag.id), ["urn:tag:keyword:media:isolation"]);
 });

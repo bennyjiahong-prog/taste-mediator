@@ -1,4 +1,4 @@
-import { extractEntityArray, normalizeEntities, pickSeedMatch } from "@/lib/normalize";
+import { extractEntityArray, extractTags, normalizeEntities, pickSeedMatch } from "@/lib/normalize";
 import { findSeed, type Seed, type Side } from "@/lib/seeds";
 import type {
   ApiMovie,
@@ -8,15 +8,18 @@ import type {
   QlooStep,
   SeedHit,
   SideResult,
+  TasteTag,
 } from "@/lib/types";
 
 export const HACKATHON_ORIGIN = "https://hackathon.api.qloo.com";
 export const MOVIE_TYPE = "urn:entity:movie";
+export const TAG_TYPE = "urn:tag";
 export const SEARCH_PATH = "/search" as const;
 export const INSIGHTS_PATH = "/v2/insights" as const;
 
 const SEARCH_TAKE = "8";
 const INSIGHTS_TAKE = "20";
+const TAG_TAKE = "15";
 /** Three retries. 400 + 800 + 1600 = 2800ms, under a 3s cap. Retry-After is not read. */
 export const RATE_LIMIT_BACKOFF_MS = [400, 800, 1600] as const;
 
@@ -27,10 +30,18 @@ export type MediateOptions = {
   sleepImpl?: (ms: number) => Promise<void>;
 };
 
-type Fail = {
+export type Fail = {
   code: FailCode;
   message: string;
   status: number;
+};
+
+export type QlooContext = {
+  base: string;
+  key: string;
+  steps: QlooStep[];
+  fetchImpl: typeof fetch;
+  sleepImpl: (ms: number) => Promise<void>;
 };
 
 function failure(
@@ -250,13 +261,7 @@ function readMovies(body: unknown, key: string, what: string): ApiMovie[] | Fail
 
 async function resolveSeed(
   seed: Seed,
-  ctx: {
-    base: string;
-    key: string;
-    steps: QlooStep[];
-    fetchImpl: typeof fetch;
-    sleepImpl: (ms: number) => Promise<void>;
-  },
+  ctx: QlooContext,
 ): Promise<SeedHit | Fail> {
   let last: ReturnType<typeof pickSeedMatch> = {
     status: "miss",
@@ -303,7 +308,7 @@ async function resolveSeed(
   };
 }
 
-function withoutSeeds(movies: ApiMovie[], seedIds: Set<string>): ApiMovie[] {
+export function withoutSeeds(movies: ApiMovie[], seedIds: Set<string>): ApiMovie[] {
   const seen = new Set<string>();
   const kept: ApiMovie[] = [];
   for (const movie of movies) {
@@ -314,16 +319,10 @@ function withoutSeeds(movies: ApiMovie[], seedIds: Set<string>): ApiMovie[] {
   return kept;
 }
 
-async function pullInsights(
+export async function pullInsights(
   sideLabel: string,
   entityIds: string[],
-  ctx: {
-    base: string;
-    key: string;
-    steps: QlooStep[];
-    fetchImpl: typeof fetch;
-    sleepImpl: (ms: number) => Promise<void>;
-  },
+  ctx: QlooContext,
 ): Promise<ApiMovie[] | Fail> {
   const result = await qlooGet({
     ...ctx,
@@ -341,10 +340,63 @@ async function pullInsights(
   return readMovies(result.body, ctx.key, "insights");
 }
 
-export async function mediate(
+export async function pullTagInsights(
+  sideLabel: string,
+  entityIds: string[],
+  ctx: QlooContext,
+): Promise<TasteTag[] | Fail> {
+  const result = await qlooGet({
+    ...ctx,
+    path: INSIGHTS_PATH,
+    label: `Tag insights for ${sideLabel} · ${TAG_TYPE}`,
+    params: {
+      "filter.type": TAG_TYPE,
+      "signal.interests.entities": entityIds.join(","),
+      take: TAG_TAKE,
+    },
+  });
+  if ("code" in result) return result;
+  const fatal = fatalFromStatus(result.status, result.body, ctx.key, `tag insights for ${sideLabel}`);
+  if (fatal) return fatal;
+  if (asRecord(result.body)?.invalidJson === true) {
+    return {
+      code: "upstream",
+      status: 502,
+      message: "Qloo returned an unreadable tag insights response.",
+    };
+  }
+  const tags = extractTags(result.body);
+  if (!tags) {
+    return {
+      code: "upstream",
+      status: 502,
+      message: "Qloo returned a tag insights response this app could not read.",
+    };
+  }
+  return tags;
+}
+
+export type Prepared = {
+  ctx: QlooContext;
+  personA: Seed[];
+  personB: Seed[];
+};
+
+export function failureResult(
+  fail: Fail,
+  steps: QlooStep[],
+  seeds?: MediateFailure["seeds"],
+): { status: number; payload: MediateFailure } {
+  const payload: MediateFailure = { ok: false, code: fail.code, message: fail.message, steps };
+  if (seeds) payload.seeds = seeds;
+  return { status: fail.status, payload };
+}
+
+/** Checks the key, host, and seed catalog before any Qloo call. */
+export function prepareMediation(
   body: unknown,
   options: MediateOptions,
-): Promise<{ status: number; payload: MediateResponse }> {
+): Prepared | { status: number; payload: MediateResponse } {
   const key = options.apiKey?.trim() ?? "";
   if (!key) {
     return failure(
@@ -380,51 +432,66 @@ export async function mediate(
     return failure("bad_request", "Both people need to use the same shelf.", 400, []);
   }
 
-  const steps: QlooStep[] = [];
-  const ctx = {
-    base,
-    key,
-    steps,
-    fetchImpl: options.fetchImpl ?? fetch,
-    sleepImpl:
-      options.sleepImpl ??
-      ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))),
+  return {
+    personA,
+    personB,
+    ctx: {
+      base,
+      key,
+      steps: [],
+      fetchImpl: options.fetchImpl ?? fetch,
+      sleepImpl:
+        options.sleepImpl ??
+        ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))),
+    },
   };
+}
 
-  const hitsA: SeedHit[] = [];
-  for (const seed of personA) {
+export async function resolveSide(seeds: Seed[], ctx: QlooContext): Promise<SeedHit[] | Fail> {
+  const hits: SeedHit[] = [];
+  for (const seed of seeds) {
     const hit = await resolveSeed(seed, ctx);
-    if ("code" in hit) return failure(hit.code, hit.message, hit.status, steps);
-    hitsA.push(hit);
+    if ("code" in hit) return hit;
+    hits.push(hit);
   }
-  const hitsB: SeedHit[] = [];
-  for (const seed of personB) {
-    const hit = await resolveSeed(seed, ctx);
-    if ("code" in hit) return failure(hit.code, hit.message, hit.status, steps);
-    hitsB.push(hit);
-  }
+  return hits;
+}
 
-  const idsA = hitsA.flatMap((hit) => (hit.entityId ? [hit.entityId] : []));
-  const idsB = hitsB.flatMap((hit) => (hit.entityId ? [hit.entityId] : []));
-  const seeds = { personA: hitsA, personB: hitsB };
+export function resolvedIds(hits: SeedHit[]): string[] {
+  return hits.flatMap((hit) => (hit.entityId ? [hit.entityId] : []));
+}
+
+export const SEED_UNRESOLVED: Fail = {
+  code: "seed_unresolved",
+  status: 422,
+  message:
+    "One side has no resolved movie, so insights was not called. No recommendation list is shown.",
+};
+
+export async function mediate(
+  body: unknown,
+  options: MediateOptions,
+): Promise<{ status: number; payload: MediateResponse }> {
+  const prepared = prepareMediation(body, options);
+  if (!("ctx" in prepared)) return prepared;
+  const { ctx } = prepared;
+  const steps = ctx.steps;
+
+  const hitsA = await resolveSide(prepared.personA, ctx);
+  if (!Array.isArray(hitsA)) return failureResult(hitsA, steps);
+  const hitsB = await resolveSide(prepared.personB, ctx);
+  if (!Array.isArray(hitsB)) return failureResult(hitsB, steps);
+
+  const idsA = resolvedIds(hitsA);
+  const idsB = resolvedIds(hitsB);
   if (idsA.length === 0 || idsB.length === 0) {
-    return failure(
-      "seed_unresolved",
-      "One side has no resolved movie, so insights was not called. No recommendation list is shown.",
-      422,
-      steps,
-      seeds,
-    );
+    return failureResult(SEED_UNRESOLVED, steps, { personA: hitsA, personB: hitsB });
   }
 
   const insightsA = await pullInsights("Person A", idsA, ctx);
-  if (!Array.isArray(insightsA)) {
-    return failure(insightsA.code, insightsA.message, insightsA.status, steps);
-  }
+  if (!Array.isArray(insightsA)) return failureResult(insightsA, steps);
   const insightsB = await pullInsights("Person B", idsB, ctx);
-  if (!Array.isArray(insightsB)) {
-    return failure(insightsB.code, insightsB.message, insightsB.status, steps);
-  }
+  if (!Array.isArray(insightsB)) return failureResult(insightsB, steps);
 
   const seedIds = new Set([...idsA, ...idsB]);
   const payload: MediateResponse = {
@@ -436,6 +503,6 @@ export async function mediate(
   return { status: 200, payload };
 }
 
-function sideResult(seeds: SeedHit[], insights: ApiMovie[]): SideResult {
+export function sideResult(seeds: SeedHit[], insights: ApiMovie[]): SideResult {
   return { seeds, insights };
 }

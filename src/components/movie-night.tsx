@@ -6,7 +6,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { seedKey, seedsFor, type Preset, type Seed, type Side } from "@/lib/seeds";
-import type { ApiMovie, MediateFailure, MediateSuccess, QlooStep, SeedHit } from "@/lib/types";
+import type {
+  AgentReport,
+  AgentToolCall,
+  ApiMovie,
+  MediateFailure,
+  MediateSuccess,
+  QlooStep,
+  SeedHit,
+  TasteTag,
+} from "@/lib/types";
 import { partitionZones, topTags } from "@/lib/zones";
 
 const SHOW_LIMIT = 8;
@@ -102,8 +111,9 @@ export function MovieNight({ children }: { children?: ReactNode }) {
           Taste Mediator
         </h1>
         <p className="mt-4 max-w-2xl text-lg leading-relaxed text-muted-foreground">
-          One shelf is horror. The other is romance. Mediate resolves the titles you picked, asks
-          Qloo for each person separately, and lays out the conflict and the overlap.
+          One shelf is horror. The other is romance. An AI agent calls Qloo tools to resolve the
+          titles you picked, pull insights for each person separately, and explain the conflict and
+          the overlap. The overlap itself is computed by code.
         </p>
       </header>
 
@@ -247,8 +257,8 @@ function IdleResults() {
     <section className="rounded-2xl border border-dashed border-border bg-card/70 px-5 py-8">
       <h2 className="font-heading text-2xl">No mediation yet</h2>
       <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-        Press Mediate. Search runs first, then two insight pulls. This page does not keep a sample
-        list.
+        Press Mediate. The agent plans the Qloo calls: search, two insight pulls, optional tag
+        insights, then a deterministic comparison. This page does not keep a sample list.
       </p>
     </section>
   );
@@ -259,8 +269,8 @@ function LoadingResults() {
     <section className="rounded-2xl border border-border bg-card px-5 py-8">
       <h2 className="font-heading text-2xl">Asking Qloo</h2>
       <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-        Resolving each selected title, then requesting movie insights for Person A and again for
-        Person B. Titles appear only after those calls return.
+        The agent is calling Qloo tools: resolving each selected title, then requesting movie
+        insights for Person A and again for Person B. Titles appear only after those calls return.
       </p>
     </section>
   );
@@ -273,6 +283,11 @@ function ErrorResults({ failure }: { failure: MediateFailure }) {
       <p className="mt-2 max-w-2xl text-sm leading-relaxed" data-testid="results-message">
         {visibleFailureMessage(failure)}
       </p>
+      {failure.agent ? (
+        <div className="mt-6">
+          <AgentPanel agent={failure.agent} />
+        </div>
+      ) : null}
       {failure.seeds ? (
         <div className="mt-6">
           <SeedReport personA={failure.seeds.personA} personB={failure.seeds.personB} />
@@ -295,6 +310,7 @@ function ReadyResults({ data }: { data: MediateSuccess }) {
 
   return (
     <div className="flex flex-col gap-8">
+      {data.agent ? <AgentPanel agent={data.agent} /> : null}
       <blockquote className="max-w-3xl font-heading text-2xl leading-snug sm:text-3xl">
         {zones.overlap.length > 0
           ? "The safe zone is the overlap. A title is here because both pulls returned it."
@@ -503,6 +519,61 @@ function SeedList({ label, hits }: { label: string; hits: SeedHit[] }) {
   );
 }
 
+function AgentPanel({ agent }: { agent: AgentReport }) {
+  return (
+    <section
+      className="rounded-2xl border border-border bg-card px-4 py-5 sm:px-5"
+      data-testid="agent-panel"
+      aria-labelledby="agent-heading"
+    >
+      <h2 id="agent-heading" className="font-heading text-2xl">
+        {agent.mode === "agent" ? "The agent's mediation" : "Agent fallback"}
+      </h2>
+      {agent.notice ? (
+        <p className="mt-2 max-w-3xl text-sm leading-relaxed" data-testid="agent-notice" role="status">
+          {agent.notice}
+        </p>
+      ) : null}
+      {agent.explanation ? (
+        <>
+          <p className="mt-3 max-w-3xl text-base leading-relaxed whitespace-pre-line" data-testid="agent-explanation">
+            {agent.explanation}
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Written by {agent.model ?? "the model"} after calling the Qloo tools below. The zones
+            are computed by code from Qloo entity IDs, not by the model.
+          </p>
+        </>
+      ) : null}
+      {agent.tags && agent.tags.shared.length > 0 ? (
+        <div className="mt-3">
+          <p className="text-sm font-medium">Taste tags Qloo returned for both people</p>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {agent.tags.shared.slice(0, 8).map((tag) => (
+              <Badge key={tag.id} variant="outline">
+                {tag.name}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {agent.toolCalls.length > 0 ? (
+        <div className="mt-4">
+          <h3 className="text-sm font-medium">Tools the agent chose, in order</h3>
+          <ol className="mt-1 space-y-1 font-mono text-xs leading-relaxed text-muted-foreground" data-testid="agent-tools">
+            {agent.toolCalls.map((call, index) => (
+              <li key={`${call.tool}-${index}`}>
+                {index + 1}. {call.tool}
+                {call.input ? `(${call.input})` : "()"} · {call.ok ? "ok" : "failed"} · {call.summary}
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function Trace({ steps }: { steps: QlooStep[] }) {
   return (
     <section aria-labelledby="trace-heading">
@@ -601,6 +672,51 @@ function asSteps(value: unknown): QlooStep[] {
   });
 }
 
+function asTags(value: unknown): TasteTag[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const tag = item as Partial<TasteTag> | null;
+    return tag && typeof tag.id === "string" && typeof tag.name === "string"
+      ? [{ id: tag.id, name: tag.name }]
+      : [];
+  });
+}
+
+function asAgent(value: unknown): AgentReport | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const agent = value as Partial<AgentReport>;
+  if (agent.mode !== "agent" && agent.mode !== "fallback") return undefined;
+  const toolCalls = Array.isArray(agent.toolCalls)
+    ? agent.toolCalls.flatMap((item): AgentToolCall[] => {
+        const call = item as Partial<AgentToolCall> | null;
+        if (!call || typeof call.tool !== "string" || typeof call.summary !== "string") return [];
+        return [
+          {
+            tool: call.tool,
+            input: typeof call.input === "string" ? call.input : "",
+            ok: call.ok === true,
+            summary: call.summary,
+          },
+        ];
+      })
+    : [];
+  const tags = agent.tags && typeof agent.tags === "object" ? agent.tags : null;
+  return {
+    mode: agent.mode,
+    model: typeof agent.model === "string" ? agent.model : null,
+    notice: typeof agent.notice === "string" ? agent.notice : null,
+    explanation: typeof agent.explanation === "string" ? agent.explanation : null,
+    toolCalls,
+    tags: tags
+      ? {
+          personA: asTags(tags.personA),
+          personB: asTags(tags.personB),
+          shared: asTags(tags.shared),
+        }
+      : null,
+  };
+}
+
 function asSuccess(value: unknown): MediateSuccess | null {
   if (!value || typeof value !== "object") return null;
   const payload = value as Partial<MediateSuccess>;
@@ -609,9 +725,11 @@ function asSuccess(value: unknown): MediateSuccess | null {
   if (!Array.isArray(payload.personA.insights) || !Array.isArray(payload.personB.insights)) {
     return null;
   }
+  const agent = asAgent(payload.agent);
   return {
     ok: true,
     steps: asSteps(payload.steps),
+    ...(agent ? { agent } : {}),
     personA: {
       seeds: asSeeds(payload.personA.seeds),
       insights: payload.personA.insights.filter(isMovie).map(cleanMovie),
@@ -633,11 +751,13 @@ function asFailure(value: unknown): MediateFailure | null {
     payload.seeds && Array.isArray(payload.seeds.personA) && Array.isArray(payload.seeds.personB)
       ? { personA: asSeeds(payload.seeds.personA), personB: asSeeds(payload.seeds.personB) }
       : undefined;
+  const agent = asAgent(payload.agent);
   return {
     ok: false,
     code: payload.code,
     message: payload.message,
     steps: asSteps(payload.steps),
     ...(seeds ? { seeds } : {}),
+    ...(agent ? { agent } : {}),
   };
 }
