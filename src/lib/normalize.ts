@@ -1,4 +1,4 @@
-import type { ApiMovie, SeedStatus } from "@/lib/types";
+import type { ApiMovie, SeedStatus, TasteTag } from "@/lib/types";
 
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_.-]{7,127}$/;
 
@@ -56,7 +56,7 @@ function pickImage(props: Record<string, unknown> | null): string | null {
   if (!raw) return null;
   try {
     const url = new URL(raw);
-    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    if (url.protocol !== "https:") return null;
     if (url.username || url.password) return null;
     return url.toString();
   } catch {
@@ -117,6 +117,30 @@ export function extractEntityArray(
   }
   if (Array.isArray(root.entities)) return { ok: true, entities: root.entities };
   return { ok: false };
+}
+
+const TAG_ID_RE = /^urn:tag:[A-Za-z0-9:_.-]{1,160}$/;
+
+/** Tag insights return `results.tags[]`; `results.entities[]` is accepted too. */
+export function extractTags(payload: unknown): TasteTag[] | null {
+  const results = asRecord(asRecord(payload)?.results);
+  const raw = Array.isArray(results?.tags)
+    ? results.tags
+    : Array.isArray(results?.entities)
+      ? results.entities
+      : null;
+  if (!raw) return null;
+  const tags: TasteTag[] = [];
+  for (const item of raw) {
+    const record = asRecord(item);
+    if (!record) continue;
+    const id = pickString(record.tag_id, record.id, record.entity_id);
+    const name = pickString(record.name);
+    if (!id || !name || !TAG_ID_RE.test(id)) continue;
+    if (tags.some((tag) => tag.id === id)) continue;
+    tags.push({ id, name: name.length > 60 ? name.slice(0, 60).trim() : name });
+  }
+  return tags;
 }
 
 export function normalizeEntities(rawList: unknown[]): ApiMovie[] {

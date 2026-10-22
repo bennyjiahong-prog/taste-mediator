@@ -41,11 +41,40 @@ export type FailCode =
   | "upstream"
   | "rate_limited";
 
+export type TasteTag = {
+  id: string;
+  name: string;
+};
+
+export type AgentToolCall = {
+  tool: string;
+  input: string;
+  ok: boolean;
+  summary: string;
+};
+
+export type AgentTags = {
+  personA: TasteTag[];
+  personB: TasteTag[];
+  shared: TasteTag[];
+};
+
+export type AgentReport = {
+  /** "fallback" means no LLM ran; the result is the fixed pipeline. */
+  mode: "agent" | "fallback";
+  model: string | null;
+  notice: string | null;
+  explanation: string | null;
+  toolCalls: AgentToolCall[];
+  tags: AgentTags | null;
+};
+
 export type MediateSuccess = {
   ok: true;
   steps: QlooStep[];
   personA: SideResult;
   personB: SideResult;
+  agent?: AgentReport;
 };
 
 export type MediateFailure = {
@@ -57,6 +86,7 @@ export type MediateFailure = {
     personA: SeedHit[];
     personB: SeedHit[];
   };
+  agent?: AgentReport;
 };
 
 export type MediateResponse = MediateSuccess | MediateFailure;

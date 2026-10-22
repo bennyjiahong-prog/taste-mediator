@@ -1,4 +1,4 @@
-import type { ApiMovie } from "@/lib/types";
+import type { ApiMovie, TasteTag } from "@/lib/types";
 
 function mergePair(left: ApiMovie, right: ApiMovie): ApiMovie {
   const tags: string[] = [];
@@ -47,6 +47,17 @@ export function partitionZones(personA: ApiMovie[], personB: ApiMovie[]) {
   }
 
   return { overlap, aOnly, bOnly };
+}
+
+/** Exact tag-ID membership in both lists, in Person A's order. */
+export function sharedTags(personA: TasteTag[], personB: TasteTag[]): TasteTag[] {
+  const bIds = new Set(personB.map((tag) => tag.id));
+  const seen = new Set<string>();
+  return personA.filter((tag) => {
+    if (!bIds.has(tag.id) || seen.has(tag.id)) return false;
+    seen.add(tag.id);
+    return true;
+  });
 }
 
 export function topTags(movies: ApiMovie[], limit = 4): string[] {

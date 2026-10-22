@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { extractEntityArray, normalizeEntity, pickSeedMatch } from "@/lib/normalize";
+import { extractEntityArray, extractTags, normalizeEntity, pickSeedMatch } from "@/lib/normalize";
 
 const shining = {
   entity_id: "11111111-1111-4111-8111-111111111111",
@@ -39,6 +39,13 @@ test("normalizeEntity rejects unsafe ids and image urls", () => {
   });
   assert.equal(movie?.imageUrl, null);
   assert.equal(movie?.year, 1980);
+  assert.equal(
+    normalizeEntity({
+      ...shining,
+      properties: { image: { url: "http://images.example/poster.jpg" } },
+    })?.imageUrl,
+    null,
+  );
 });
 
 test("extractEntityArray reads search and insights shapes", () => {
@@ -82,4 +89,25 @@ test("pickSeedMatch uses the requested year and refuses lookalikes", () => {
   const witch = pickSeedMatch([vvitch], ["The Witch", "The VVitch"], 2015);
   assert.equal(witch.status, "matched");
   assert.equal(witch.entity?.entityId, vvitch.entityId);
+});
+
+test("tag insights keep only well-formed urn:tag IDs", () => {
+  assert.equal(extractTags({ results: {} }), null);
+  assert.deepEqual(
+    extractTags({
+      results: {
+        tags: [
+          { tag_id: "urn:tag:genre:media:horror", name: "Horror" },
+          { tag_id: "urn:tag:genre:media:horror", name: "Horror again" },
+          { tag_id: "javascript:alert(1)", name: "Bad" },
+          { id: "urn:tag:keyword:media:isolation", name: "Isolation" },
+          { tag_id: "urn:tag:genre:media:drama" },
+        ],
+      },
+    }),
+    [
+      { id: "urn:tag:genre:media:horror", name: "Horror" },
+      { id: "urn:tag:keyword:media:isolation", name: "Isolation" },
+    ],
+  );
 });
