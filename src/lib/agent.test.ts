@@ -132,7 +132,7 @@ const fullPlan = [
   calls(["get_movie_insights", { person: "A" }], ["get_movie_insights", { person: "B" }]),
   calls(["get_taste_tags", { person: "A" }], ["get_taste_tags", { person: "B" }]),
   calls(["compare_tastes", {}]),
-  say("Watch Shared Night: both Qloo pulls returned it, and both sides share the Isolation tag."),
+  say(`SHARED ${IDS.shared}`),
 ];
 
 function options(model: MockLanguageModelV4 | null, fetchImpl: typeof fetch) {
@@ -170,7 +170,10 @@ test("agent plans Qloo tool calls and the overlap comes from code", async () => 
       "compare_tastes::true",
     ],
   );
-  assert.match(agent.explanation ?? "", /Shared Night/);
+  assert.equal(
+    agent.explanation,
+    "Watch Shared Night (2014): it appears in both Qloo movie-insight pulls with the same entity ID.",
+  );
   assert.deepEqual(agent.tags?.shared.map((tag) => tag.name), ["Isolation"]);
 
   const zones = partitionZones(result.payload.personA.insights, result.payload.personB.insights);
@@ -188,7 +191,10 @@ test("agent plans Qloo tool calls and the overlap comes from code", async () => 
   assert.equal(result.payload.steps.length, urls.length);
 
   const compareResult = JSON.stringify(model.doGenerateCalls[4]?.prompt);
-  assert.match(compareResult, /"overlap":\[\{"name":"Shared Night"/);
+  assert.match(
+    compareResult,
+    new RegExp(`"overlap":\\[\\{"entityId":"${IDS.shared}","name":"Shared Night"`),
+  );
 
   const serialized = JSON.stringify(result.payload);
   assert.equal(serialized.includes(QLOO_KEY), false);
@@ -258,6 +264,20 @@ test("an agent that skips the comparison does not get its text shown", async () 
   }
 });
 
+test("an ungrounded final directive is hidden after comparison", async () => {
+  const model = new MockLanguageModelV4({
+    doGenerate: [...fullPlan.slice(0, 4), say(`SHARED ${IDS.dark}`)],
+  });
+  const { fetchImpl } = qloo();
+  const result = await mediateWithAgent(body, options(model, fetchImpl));
+
+  assert.equal(result.status, 200);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.agent?.mode, "agent");
+  assert.equal(result.payload.agent?.explanation, null);
+  assert.match(result.payload.agent?.notice ?? "", /failed entity-ID grounding/);
+});
+
 test("a rejected Qloo key stops the agent loop and clears results", async () => {
   const model = new MockLanguageModelV4({ doGenerate: fullPlan });
   const { fetchImpl } = qloo(() => ({ status: 401, body: { message: "bad key" } }));
@@ -307,12 +327,12 @@ test("the loop is capped and secrets in model text are redacted", async () => {
   );
 
   const leaky = new MockLanguageModelV4({
-    doGenerate: [...fullPlan.slice(0, 4), say(`Use ${QLOO_KEY} and ${LLM_KEY}.`)],
+    doGenerate: [...fullPlan.slice(0, 4), say(`SHARED ${IDS.shared} ${QLOO_KEY} ${LLM_KEY}`)],
   });
   const leakResult = await mediateWithAgent(body, options(leaky, qloo().fetchImpl));
-  const text = leakResult.payload.agent?.explanation ?? "";
-  assert.equal(text.includes(QLOO_KEY), false);
-  assert.equal(text.includes(LLM_KEY), false);
+  const serialized = JSON.stringify(leakResult.payload.agent);
+  assert.equal(serialized.includes(QLOO_KEY), false);
+  assert.equal(serialized.includes(LLM_KEY), false);
 });
 
 test("a missing Qloo key fails before the model is called", async () => {

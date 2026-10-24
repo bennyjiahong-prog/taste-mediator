@@ -540,8 +540,9 @@ function AgentPanel({ agent }: { agent: AgentReport }) {
             {agent.explanation}
           </p>
           <p className="mt-2 text-xs text-muted-foreground">
-            Written by {agent.model ?? "the model"} after calling the Qloo tools below. The zones
-            are computed by code from Qloo entity IDs, not by the model.
+            Rendered by code from an entity-ID choice made by {agent.model ?? "the model"} after
+            calling the Qloo tools below. Invalid or mislabelled IDs are not displayed. The zones
+            are also computed by code from Qloo entity IDs.
           </p>
         </>
       ) : null}

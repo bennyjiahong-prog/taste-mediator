@@ -51,10 +51,13 @@ Plan, then use the tools:
 
 Rules:
 - A movie is "shared" only if compare_tastes lists it under overlap. Never call any other movie shared, safe, or a compromise for both.
-- If overlap is empty, say so plainly and recommend taking turns. You may point to one A-only and one B-only title, labelled as one person's pick.
-- Only name movies and tags that a tool returned. Do not invent titles, numbers, or reasons Qloo did not give.
+- Do not write prose or movie titles in the final answer. The server renders the recommendation from validated entity IDs.
 - If a tool returns an error, stop calling tools and explain what failed.
-- Final answer: plain text, at most 120 words, no headings. Start with the recommendation, then the reasoning.`;
+- Final answer after compare_tastes must be exactly one of:
+  SHARED <an entityId from overlap>
+  TAKE_TURNS <an entityId from aOnlySample> <an entityId from bOnlySample>
+  NO_SHARED
+- Use SHARED when overlap is non-empty. Use TAKE_TURNS or NO_SHARED when overlap is empty.`;
 
 type State = {
   prepared: Prepared;
@@ -79,7 +82,12 @@ function seedIds(state: State): Set<string> {
 }
 
 function brief(movie: ApiMovie) {
-  return { name: movie.name, year: movie.year, tags: movie.tags.slice(0, 3) };
+  return {
+    entityId: movie.entityId,
+    name: movie.name,
+    year: movie.year,
+    tags: movie.tags.slice(0, 3),
+  };
 }
 
 function once<T>(
@@ -273,6 +281,39 @@ function tagReport(state: State): AgentReport["tags"] {
   return { personA: a, personB: b, shared: state.tags.A && state.tags.B ? sharedTags(a, b) : [] };
 }
 
+function movieLabel(movie: ApiMovie): string {
+  return movie.year ? `${movie.name} (${movie.year})` : movie.name;
+}
+
+function groundedExplanation(raw: string, state: State): string | null {
+  const a = state.insights.A;
+  const b = state.insights.B;
+  if (!a || !b) return null;
+  const zones = partitionZones(a, b);
+  const parts = raw.trim().split(/\s+/);
+
+  if (parts.length === 2 && parts[0] === "SHARED") {
+    const movie = zones.overlap.find((item) => item.entityId === parts[1]);
+    return movie
+      ? `Watch ${movieLabel(movie)}: it appears in both Qloo movie-insight pulls with the same entity ID.`
+      : null;
+  }
+
+  if (zones.overlap.length === 0 && parts.length === 3 && parts[0] === "TAKE_TURNS") {
+    const personA = zones.aOnly.find((item) => item.entityId === parts[1]);
+    const personB = zones.bOnly.find((item) => item.entityId === parts[2]);
+    return personA && personB
+      ? `Qloo returned no exact-ID overlap. Take turns: ${movieLabel(personA)} is a Person A-only pick, and ${movieLabel(personB)} is a Person B-only pick.`
+      : null;
+  }
+
+  if (zones.overlap.length === 0 && parts.length === 1 && parts[0] === "NO_SHARED") {
+    return "Qloo returned no exact-ID overlap, so the Safe zone stays empty. Take turns instead of inventing a shared title.";
+  }
+
+  return null;
+}
+
 export function fallbackReport(notice: string): AgentReport {
   return { mode: "fallback", model: null, notice, explanation: null, toolCalls: [], tags: null };
 }
@@ -320,7 +361,12 @@ export async function mediateWithAgent(body: unknown, options: AgentOptions): Pr
         .join(", ")}.`,
       abortSignal: AbortSignal.timeout(AGENT_TIMEOUT_MS),
     });
-    explanation = result.text.trim() || null;
+    const raw = result.text.trim();
+    explanation = raw ? groundedExplanation(raw, state) : null;
+    if (state.compared && !explanation) {
+      notice =
+        "The agent compared both lists, but its recommendation failed entity-ID grounding, so its text is not shown.";
+    }
   } catch (error) {
     mode = "fallback";
     notice = failureNotice(error);
