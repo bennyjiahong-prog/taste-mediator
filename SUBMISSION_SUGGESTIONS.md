@@ -17,15 +17,21 @@ At the time of the second-round review, the repository had no LLM, no agent fram
 What was added, and what can be claimed:
 
 - **Agent framework:** Vercel AI SDK (`ai` v7) `ToolLoopAgent`, calling a model through OpenRouter's OpenAI-compatible API (`@ai-sdk/openai-compatible`, base URL `https://openrouter.ai/api/v1`). Default model `openai/gpt-4o-mini`, overridable with `OPENROUTER_MODEL`. This fits rule (b) "built using an agent framework" and (a) "functions as an agentic tool".
-- **Tools the model can call:** `resolve_seeds` (Qloo `GET /search`), `get_movie_insights` (Qloo `GET /v2/insights`, `urn:entity:movie`), `get_taste_tags` (Qloo `GET /v2/insights`, `filter.type=urn:tag`), and `compare_tastes` (deterministic exact-ID intersection). The model chooses the order and writes a short explanation.
-- **Honesty guards are code:** the zones are computed from Qloo entity IDs, not from model text; the model's explanation is hidden if it did not call `compare_tastes`; required search or movie-insights failures stop the loop and clear results; the loop is capped at 8 model steps. Optional tag-insights failures other than a rejected key or rate limit are reported without clearing valid movie results.
+- **Tools the model can call:** `resolve_seeds` (Qloo `GET /search`), `get_movie_insights` (Qloo `GET /v2/insights`, `urn:entity:movie`), optional `get_taste_tags` (Qloo `GET /v2/insights`, `filter.type=urn:tag`), and `compare_tastes` (deterministic exact-ID intersection).
+- **Honesty guards are code:** the zones are computed from Qloo entity IDs, not from model text. After comparison, the model can select only returned entity IDs; code verifies the IDs against the overlap/A-only/B-only zones and renders the explanation. Free-form prose, invented IDs, and mislabelled IDs are not displayed. Required search or movie-insights failures stop the loop and clear results; the loop is capped at 8 model steps.
 - **Fallback:** without `OPENROUTER_API_KEY`, the agent does not run; if the model fails, it does not complete. The server returns the fixed search-then-insights result, reusing Qloo steps that already finished, and the page shows a notice.
 - **Tests:** model and Qloo are mocked. No test calls OpenRouter or Qloo. No live end-to-end run with real keys was done in this change, so no latency, accuracy, or quality numbers exist. Do not quote any.
 - **Not verified live:** the `filter.type=urn:tag` request was written from the Qloo Insights documentation and tested only against mocks. If the hackathon key rejects it, the tool list shows `get_taste_tags · failed` and the movie result still stands. Check this on the live demo before claiming tag insights in the write-up.
 - **Still not used:** audiences, cross-domain entity types (music, books, places), and Qloo explainability. Do not claim them.
 - **Cost risk:** each Mediate press is up to 8 OpenRouter model calls on a public, un-rate-limited endpoint. Set a credit limit on the OpenRouter key before judging.
 
-Wording rule: say "an AI agent that calls Qloo tools" only for the deployed demo with `OPENROUTER_API_KEY` set. Do not say the agent "decides" the overlap; code decides it, and the agent explains it.
+Wording rule: say "an AI agent that calls Qloo tools" only for the deployed demo with `OPENROUTER_API_KEY` set. Do not say the agent "decides" or freely explains the overlap; code computes the zones and renders grounded copy from the agent's validated entity-ID selection.
+
+### Live-agent stability follow-up (2026-10-24)
+
+The deployed demo was observed intermittently, then repeatedly, returning `agent.mode="fallback"` with model HTTP 400 while Vercel reported `deepseek/deepseek-chat-v3.1`. The fixed Qloo pipeline still returned `ok:true`; that is not evidence that the agent completed.
+
+This change hardens OpenRouter tool requests by disabling parallel tool calls, requiring parameter-compatible provider routing, and disabling reasoning for DeepSeek models. Local tests verify the request shape and fallback/grounding behavior, but they do not call OpenRouter with a real key. **Ben still needs to set Vercel `OPENROUTER_MODEL=openai/gpt-4o-mini`, redeploy, and run both locked presets repeatedly.** Do not claim the live agent is stable until each response shows `mode="agent"`, `compare_tastes`, and a grounded explanation.
 
 ### Corrections to the first-round notes
 
@@ -64,11 +70,11 @@ Second-round note: both lines are accurate. If the Safe zone is empty for the ma
 
 ### Impact
 
-> Taste Mediator turns a familiar movie-night disagreement into two independent views of Qloo's cultural graph. An AI agent resolves each selected movie through Qloo search, runs one movie-insights pull for each person, and asks a deterministic tool to compare the returned Qloo entity IDs before it explains the outcome. Movies returned for only one person stay visible in the Conflict zone; a movie reaches the Safe zone only when both pulls return the same entity. If there is no shared entity, the app shows an empty Safe zone instead of inserting a fallback recommendation.
+> Taste Mediator turns a familiar movie-night disagreement into two independent views of Qloo's cultural graph. A Vercel AI SDK agent calls Qloo search and insights tools, while deterministic code compares the two Qloo result sets by exact entity ID and grounds the displayed mediation. Movies returned for only one person stay visible in the Conflict zone; a movie reaches the Safe zone only when both pulls return the same entity. If there is no shared entity, the app shows an empty Safe zone instead of inserting a fallback recommendation.
 
 ### What it does
 
-> Taste Mediator is a focused movie-night demo for two people with different tastes. Person A chooses from a locked horror shelf and Person B chooses from a locked romance shelf. An AI agent, built with the Vercel AI SDK, plans and calls Qloo tools on the server: it resolves the selected titles with Qloo's `GET /search`, makes two separate `GET /v2/insights` requests (one for each person), can ask Qloo for each person's taste tags, and then calls a deterministic comparison tool. The selected seeds are removed from both lists, so a seed never counts as overlap. A movie reaches the Safe zone only when both Qloo pulls return the same entity ID; that rule is code, not the model. The agent then explains the result in plain language, and the page shows the tools it chose and every Qloo call it made. If Qloo fails, results are cleared rather than replaced with sample data. If the model is unavailable, the app runs the same Qloo steps without the agent and says so.
+> Taste Mediator is a focused movie-night demo with locked horror and romance presets. An AI agent, built with the Vercel AI SDK and served through OpenRouter, plans and calls Qloo tools on the server: it resolves the selected titles with Qloo's `GET /search`, makes two separate `GET /v2/insights` requests (one for each person), can optionally ask Qloo for taste tags, and then calls a deterministic comparison tool. The selected seeds are removed from both lists, so a seed never counts as overlap. A movie reaches the Safe zone only when both Qloo pulls return the same entity ID; that rule is code, not the model. Code validates the agent's selected entity IDs and renders the explanation, while the page shows the tools it chose and every Qloo call it made. If Qloo fails, results are cleared rather than replaced with sample data. If the model is unavailable, the app runs the same Qloo steps without the agent and says so.
 
 ## Add the missing Devpost story
 
@@ -83,7 +89,7 @@ Explain the real movie-night disagreement or product observation that motivated 
 Safe repository-backed points:
 
 - Next.js, React, TypeScript, and Tailwind CSS UI plus a server-side `POST /api/mediate` route.
-- A Vercel AI SDK `ToolLoopAgent` (model served through OpenRouter) that calls four tools: seed search, movie insights, tag insights, and a deterministic comparison.
+- A Vercel AI SDK `ToolLoopAgent` (model served through OpenRouter) that calls seed search, movie insights, optional tag insights, and a deterministic comparison.
 - Qloo `GET /search` resolves the locked movie seeds.
 - Two independent Qloo `GET /v2/insights` calls produce the two result sets.
 - Exact `entityId` membership creates A-only, B-only, and overlap zones.
@@ -97,7 +103,7 @@ Only claim challenges the owner actually encountered. Potential topics visible i
 
 ### Accomplishments
 
-The code supports a modest, defensible claim: the agent's Qloo tools and the deterministic comparison are isolated behind a server route and covered by unit tests (mocked model and mocked Qloo) for overlap, failures, retries, the no-LLM fallback, early agent stops, and key non-disclosure. Avoid “production-ready,” “secure,” or “fully protected”; the public proxy does not have a durable platform-level rate limit.
+The code supports a modest, defensible claim: the agent's Qloo tools and deterministic comparison are isolated behind a server route and covered by unit tests (mocked model and mocked Qloo) for overlap, failures, retries, OpenRouter tool-routing options, the no-LLM fallback, early agent stops, entity-ID grounding, and key non-disclosure. Avoid “production-ready,” “secure,” “fully protected,” or “100% stable”; the tests do not exercise a real OpenRouter provider and the public proxy does not have a durable platform-level rate limit.
 
 ### What we learned
 
@@ -110,7 +116,7 @@ Label future ideas as future work. Plausible options include free-form movie inp
 ## Judge-facing demo order
 
 1. State the constraint: two locked, deliberately different shelves.
-2. Press **Mediate** once. Point out the agent panel: its explanation, the tools it chose in order, then the resolved seeds and the `/v2/insights` trace entries.
+2. Press **Mediate** once. Point out the agent panel: its code-grounded explanation, the tools it chose in order, then the resolved seeds and the `/v2/insights` trace entries.
 3. Show A-only and B-only results before showing exact-ID overlap.
 4. If the Safe zone is empty, frame that as the designed honest outcome—not a broken demo.
 5. Show that the browser calls only `/api/mediate`; never reveal environment values or an `X-Api-Key` header from a server log.
