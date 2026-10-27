@@ -7,6 +7,22 @@ export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 /** Cheap on OpenRouter and lists `tools` in its supported parameters. */
 export const DEFAULT_MODEL = "openai/gpt-4o-mini";
 
+function withStableToolRouting(body: Record<string, unknown>, modelId: string) {
+  if (!Array.isArray(body.tools) || body.tools.length === 0) return body;
+  const provider =
+    typeof body.provider === "object" && body.provider !== null && !Array.isArray(body.provider)
+      ? body.provider
+      : {};
+  return {
+    ...body,
+    parallel_tool_calls: false,
+    provider: { ...provider, require_parameters: true },
+    ...(modelId.startsWith("deepseek/")
+      ? { reasoning: { enabled: false, exclude: true } }
+      : {}),
+  };
+}
+
 export type AgentModel = {
   model: LanguageModel | null;
   modelId: string | null;
@@ -26,6 +42,7 @@ export function agentModelFromEnv(
     apiKey,
     headers: { "X-Title": "Taste Mediator" },
     ...(fetchImpl ? { fetch: fetchImpl } : {}),
+    transformRequestBody: (body) => withStableToolRouting(body, modelId),
   });
   return { model: provider.chatModel(modelId), modelId, secrets: [apiKey] };
 }
