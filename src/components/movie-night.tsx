@@ -316,7 +316,7 @@ function ReadyResults({ data }: { data: MediateSuccess }) {
           ? "The safe zone is the overlap. A title is here because both pulls returned it."
           : bothEmpty
             ? "Neither pull returned a title, so the overlap is empty too."
-            : "No title landed in both pulls. The compromise tonight is to take turns."}
+            : "No shared Qloo entity—Safe zone stays empty. Take turns."}
       </blockquote>
       <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
         Each side is its own Qloo insights call. A shared title is membership in both lists. The
@@ -361,7 +361,7 @@ function ReadyResults({ data }: { data: MediateSuccess }) {
         <p className="mt-1 text-sm text-muted-foreground">
           {zones.overlap.length > 0
             ? "Listed in the order Person A's pull returned them."
-            : "Zero overlap. No title was added to fill this space."}
+            : "Empty Safe zone means the two Qloo pulls shared no entity ID—we don't invent a title to fill it."}
         </p>
         {zones.overlap.length > 0 ? (
           <ul className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -375,7 +375,7 @@ function ReadyResults({ data }: { data: MediateSuccess }) {
           <p className="mt-4 max-w-2xl text-sm leading-relaxed">
             {bothEmpty
               ? "Qloo returned no movie entities for either person."
-              : "Watch one person's pick this week and the other's next week. A hybrid only belongs here after a later call actually returns it for both."}
+              : "Take turns: watch one person's pick this week and the other's next week."}
           </p>
         )}
       </section>
